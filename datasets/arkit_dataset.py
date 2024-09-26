@@ -44,6 +44,7 @@ class ARKitDataset(GenericMVSDataset):
             include_high_res_color=False,
             pass_frame_id=False,
             skip_frames=None,
+            skip_to_frame=None,
             verbose_init=True,
             min_valid_depth=1e-3,
             max_valid_depth=10,
@@ -64,7 +65,7 @@ class ARKitDataset(GenericMVSDataset):
                 include_full_depth_K=include_full_depth_K, 
                 include_high_res_color=include_high_res_color, 
                 pass_frame_id=pass_frame_id, skip_frames=skip_frames, 
-                verbose_init=verbose_init, 
+                skip_to_frame=skip_to_frame, verbose_init=verbose_init, 
                 native_depth_width=native_depth_width,
                 native_depth_height=native_depth_height
             )
@@ -186,6 +187,7 @@ class ARKitDataset(GenericMVSDataset):
             valid_frames = []
 
             bad_file_count = 0
+            dist_to_last_valid_frame = 0
             for frame_id in all_frame_ids:
 
                 try:
@@ -205,15 +207,18 @@ class ARKitDataset(GenericMVSDataset):
                         np.isinf(np.sum(world_T_cam)) or 
                         np.isneginf(np.sum(world_T_cam))
                     ):
+                        dist_to_last_valid_frame+=1
                         bad_file_count+=1
                         continue
 
                 except:
                     if not os.path.isfile(color_filename):
+                        dist_to_last_valid_frame+=1
                         bad_file_count+=1
                         continue
 
-                valid_frames.append(scan + " " + str(frame_id))
+                valid_frames.append(f"{scan} {frame_id} {dist_to_last_valid_frame}")
+                dist_to_last_valid_frame = 0
 
             print(f"Scene {scan} has {bad_file_count} bad frame files "
                 f"out of {len(all_frame_ids)}.")
@@ -364,13 +369,14 @@ class ARKitDataset(GenericMVSDataset):
 
         return world_T_cam, cam_T_world
 
-    def load_intrinsics(self, scan_id, frame_id):
+    def load_intrinsics(self, scan_id, frame_id, flip=None):
         """ Loads intrinsics, computes scaled intrinsics, and returns a dict 
             with intrinsics matrices for a frame at multiple scales.
 
             Args: 
                 scan_id: the scan this file belongs to.
                 frame_id: id for the frame. 
+                flip: unused
 
             Returns:
                 output_dict: A dict with

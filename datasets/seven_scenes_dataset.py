@@ -64,6 +64,7 @@ class SevenScenesDataset(GenericMVSDataset):
             include_high_res_color=False,
             pass_frame_id=False,
             skip_frames=None,
+            skip_to_frame=None,
             verbose_init=True,
             min_valid_depth=1e-3,
             max_valid_depth=10,
@@ -83,7 +84,7 @@ class SevenScenesDataset(GenericMVSDataset):
                 include_full_depth_K=include_full_depth_K, 
                 include_high_res_color=include_high_res_color, 
                 pass_frame_id=pass_frame_id, skip_frames=skip_frames, 
-                verbose_init=verbose_init,
+                skip_to_frame=skip_to_frame, verbose_init=verbose_init,
             )
         """
         Args:
@@ -199,6 +200,7 @@ class SevenScenesDataset(GenericMVSDataset):
 
             scan_sub_dir = "/".join(scan_dir.split("/")[-2:])
 
+            dist_to_last_valid_frame = 0
             bad_file_count = 0
             valid_frames = []
             for frame_id in all_frame_ids:
@@ -206,12 +208,14 @@ class SevenScenesDataset(GenericMVSDataset):
                 color_filepath = os.path.join(scan_dir, 
                                             f"frame-{frame_id}.color.png")
                 if not os.path.isfile(color_filepath):
+                    dist_to_last_valid_frame+=1
                     bad_file_count+=1
                     continue
+                
                 depth_filepath = os.path.join(scan_dir, 
                                             f"frame-{frame_id}.depth.png")
-
                 if not os.path.isfile(depth_filepath):
+                    dist_to_last_valid_frame+=1
                     bad_file_count+=1
                     continue
 
@@ -223,10 +227,12 @@ class SevenScenesDataset(GenericMVSDataset):
                     np.isinf(np.sum(world_T_cam_44)) or 
                     np.isneginf(np.sum(world_T_cam_44))
                 ):
+                    dist_to_last_valid_frame+=1
                     bad_file_count+=1
                     continue
                     
-                valid_frames.append(scan_sub_dir + " " + frame_id)
+                valid_frames.append(f"{scan_sub_dir} {frame_id} {dist_to_last_valid_frame}")
+                dist_to_last_valid_frame = 0
 
             print(f"Scene {scan} has {bad_file_count} bad frame files out "
                 f"of {len(all_frame_ids)}.")
@@ -353,7 +359,7 @@ class SevenScenesDataset(GenericMVSDataset):
         scene_path = os.path.join(self.scenes_path, scan_id)
         return os.path.join(scene_path, f"frame-{frame_id}.pose.txt")
 
-    def load_intrinsics(self, scan_id=None, frame_id=None):
+    def load_intrinsics(self, scan_id=None, frame_id=None, flip=None):
         """ Loads intrinsics, computes scaled intrinsics, and returns a dict 
             with intrinsics matrices for a frame at multiple scales.
 
@@ -361,6 +367,7 @@ class SevenScenesDataset(GenericMVSDataset):
                 scan_id: the scan this file belongs to.
                 frame_id: id for the frame. Not needed for ScanNet as images 
                 share intrinsics across a scene.
+                flip: unused.
 
             Returns:
                 output_dict: A dict with

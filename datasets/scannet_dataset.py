@@ -94,6 +94,7 @@ class ScannetDataset(GenericMVSDataset):
             include_high_res_color=False,
             pass_frame_id=False,
             skip_frames=None,
+            skip_to_frame=None,
             verbose_init=True,
             min_valid_depth=1e-3,
             max_valid_depth=10,
@@ -113,7 +114,7 @@ class ScannetDataset(GenericMVSDataset):
                 include_full_depth_K=include_full_depth_K, 
                 include_high_res_color=include_high_res_color, 
                 pass_frame_id=pass_frame_id, skip_frames=skip_frames, 
-                verbose_init=verbose_init,
+                skip_to_frame=skip_to_frame, verbose_init=verbose_init,
             )
 
         """
@@ -232,6 +233,7 @@ class ScannetDataset(GenericMVSDataset):
             # fetch total number of color files
             color_file_count = int(meta_data["numColorFrames"].strip())
 
+            dist_to_last_valid_frame = 0
             bad_file_count = 0
             valid_frames = []
             for frame_id in range(color_file_count):
@@ -247,11 +249,13 @@ class ScannetDataset(GenericMVSDataset):
 
                 # check if an image file exists.
                 if not os.path.isfile(color_filename):
+                    dist_to_last_valid_frame+=1
                     bad_file_count+=1
                     continue
                 
                 # check if a depth file exists.
                 if not os.path.isfile(depth_filename):
+                    dist_to_last_valid_frame+=1
                     bad_file_count+=1
                     continue
                 
@@ -261,10 +265,12 @@ class ScannetDataset(GenericMVSDataset):
                     np.isinf(np.sum(world_T_cam_44)) or 
                     np.isneginf(np.sum(world_T_cam_44))
                 ):
+                    dist_to_last_valid_frame+=1
                     bad_file_count+=1
                     continue
 
-                valid_frames.append(scan + " " + f"{frame_id:06d}")
+                valid_frames.append(f"{scan} {frame_id:06d} {dist_to_last_valid_frame}")
+                dist_to_last_valid_frame = 0
 
             print(f"Scene {scan} has {bad_file_count} bad frame files out of "
                   f"{color_file_count}.")
@@ -407,14 +413,17 @@ class ScannetDataset(GenericMVSDataset):
 
         return os.path.join(sensor_data_dir, f"frame-{frame_id}.pose.txt")
 
-    def load_intrinsics(self, scan_id, frame_id=None):
+    def load_intrinsics(self, scan_id, frame_id=None, flip=False):
         """ Loads intrinsics, computes scaled intrinsics, and returns a dict 
             with intrinsics matrices for a frame at multiple scales.
+            
+            ScanNet intrinsics for color and depth are the same up to scale.
 
             Args: 
                 scan_id: the scan this file belongs to.
                 frame_id: id for the frame. Not needed for ScanNet as images 
                 share intrinsics across a scene.
+                flip: flips intrinsics along x for flipped images.
 
             Returns:
                 output_dict: A dict with
@@ -429,17 +438,19 @@ class ScannetDataset(GenericMVSDataset):
         output_dict = {}
 
         scene_path = os.path.join(self.scenes_path, scan_id)
-        intrinsics_filename = os.path.join(scene_path, f"{scan_id}.txt")
+        metadata_filename = os.path.join(scene_path, f"{scan_id}.txt")
+        
         # load in basic intrinsics for the full size depth map.
-        lines = readlines(intrinsics_filename)
+        lines = readlines(metadata_filename)
         lines = [line.split(' = ') for line in lines]
         data = {key: val for key, val in lines}
 
-        K = torch.eye(4, dtype=torch.float32)
-        K[0, 0] = float(data['fx_depth'])
-        K[1, 1] = float(data['fy_depth'])
-        K[0, 2] = float(data['mx_depth'])
-        K[1, 2] = float(data['my_depth'])
+        intrinsics_filepath = os.path.join(scene_path, "intrinsic", "intrinsic_depth.txt")
+
+        K = torch.tensor(np.genfromtxt(intrinsics_filepath).astype(np.float32))
+
+        if flip:
+            K[0, 2] = float(data['depthWidth']) - K[0, 2]
 
         # optionally include the intrinsics matrix for the full res depth map.
         if self.include_full_depth_K:

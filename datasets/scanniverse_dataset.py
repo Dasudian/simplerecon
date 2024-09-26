@@ -44,6 +44,7 @@ class ScanniverseDataset(GenericMVSDataset):
             include_high_res_color=False,
             pass_frame_id=False,
             skip_frames=None,
+            skip_to_frame=None,
             verbose_init=True,
             min_valid_depth=1e-3,
             max_valid_depth=10,
@@ -65,7 +66,7 @@ class ScanniverseDataset(GenericMVSDataset):
                 include_full_depth_K=include_full_depth_K, 
                 include_high_res_color=include_high_res_color, 
                 pass_frame_id=pass_frame_id, skip_frames=skip_frames, 
-                verbose_init=verbose_init,
+                skip_to_frame=skip_to_frame, verbose_init=verbose_init,
                 native_depth_width=native_depth_width,
                 native_depth_height=native_depth_height,
             )
@@ -288,6 +289,7 @@ class ScanniverseDataset(GenericMVSDataset):
 
             # find all valid frames by checking for pose and RGB
             bad_file_count = 0
+            dist_to_last_valid_frame = 0
             valid_frames = []
             for frame_id in list(self.capture_metadata[scan].keys()):
                 world_T_cam_44, _ = self.load_pose(scan, frame_id)
@@ -295,16 +297,19 @@ class ScanniverseDataset(GenericMVSDataset):
 
                 if not os.path.exists(self.get_color_filepath(scan, frame_id)):
                     bad_file_count+=1
+                    dist_to_last_valid_frame+=1
                     continue
 
                 if (np.isnan(np.sum(world_T_cam_44)) or 
                     np.isinf(np.sum(world_T_cam_44)) or 
                     np.isneginf(np.sum(world_T_cam_44))
                 ):
+                    dist_to_last_valid_frame+=1
                     bad_file_count+=1
                     continue
 
-                valid_frames.append(f"{scan} {frame_id}")
+                valid_frames.append(f"{scan} {frame_id} {dist_to_last_valid_frame}")
+                dist_to_last_valid_frame = 0
 
             print(f"Scene {scan} has {bad_file_count} bad frame files out "
                 f"of {len(list(self.capture_metadata[scan].keys()))}.")
@@ -439,7 +444,7 @@ class ScanniverseDataset(GenericMVSDataset):
 
         return world_T_cam, cam_T_world
 
-    def load_intrinsics(self, scan_id, frame_id):
+    def load_intrinsics(self, scan_id, frame_id, flip=None):
         """ Loads intrinsics, computes scaled intrinsics, and returns a dict 
             with intrinsics matrices for a frame at multiple scales.
 
@@ -448,7 +453,8 @@ class ScanniverseDataset(GenericMVSDataset):
 
             Args: 
                 scan_id: the scan this file belongs to.
-                frame_id: id for the frame. 
+                frame_id: id for the frame.
+                flip: unused
 
             Returns:
                 output_dict: A dict with

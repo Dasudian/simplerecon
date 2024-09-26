@@ -46,6 +46,7 @@ class VDRDataset(GenericMVSDataset):
             include_high_res_color=False,
             pass_frame_id=False,
             skip_frames=None,
+            skip_to_frame=None,
             verbose_init=True,
             native_depth_width=256,
             native_depth_height=192,
@@ -64,7 +65,7 @@ class VDRDataset(GenericMVSDataset):
                 include_full_depth_K=include_full_depth_K, 
                 include_high_res_color=include_high_res_color, 
                 pass_frame_id=pass_frame_id, skip_frames=skip_frames, 
-                verbose_init=verbose_init,
+                skip_to_frame=skip_to_frame, verbose_init=verbose_init,
                 native_depth_width=native_depth_width,
                 native_depth_height=native_depth_height,
             )
@@ -123,7 +124,6 @@ class VDRDataset(GenericMVSDataset):
             with open(valid_frame_path) as f:
                 valid_frames = f.readlines()
         else:
-            valid_frames = []
 
             print(f"Compuiting valid frames for scene {scan}.")
             # find out which frames have valid poses 
@@ -133,6 +133,7 @@ class VDRDataset(GenericMVSDataset):
             color_file_count = len(self.capture_metadata[scan])
 
             valid_frames = []
+            dist_to_last_valid_frame = 0
             bad_file_count = 0
             for frame_ind in range(len(self.capture_metadata[scan])):
                 world_T_cam_44, _ = self.load_pose(scan, frame_ind)
@@ -141,9 +142,11 @@ class VDRDataset(GenericMVSDataset):
                     np.isneginf(np.sum(world_T_cam_44))
                 ):
                     bad_file_count+=1
+                    dist_to_last_valid_frame+=1
                     continue
 
-                valid_frames.append(f"{scan} {frame_ind}")
+                valid_frames.append(f"{scan} {frame_ind} {dist_to_last_valid_frame}")
+                dist_to_last_valid_frame = 0
 
             print(f"Scene {scan} has {bad_file_count} bad frame files out of "
                     f"{color_file_count}.")
@@ -201,7 +204,7 @@ class VDRDataset(GenericMVSDataset):
 
         return world_T_cam, cam_T_world
 
-    def load_intrinsics(self, scan_id, frame_id):
+    def load_intrinsics(self, scan_id, frame_id, flip=None):
         """ Loads intrinsics, computes scaled intrinsics, and returns a dict 
             with intrinsics matrices for a frame at multiple scales.
 
@@ -209,6 +212,7 @@ class VDRDataset(GenericMVSDataset):
                 scan_id: the scan this file belongs to.
                 frame_id: id for the frame. Not needed for ScanNet as images 
                 share intrinsics across a scene.
+                flip: unused
 
             Returns:
                 output_dict: A dict with
